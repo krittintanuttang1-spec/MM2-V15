@@ -1,0 +1,332 @@
+-- EXZ HUB (Rayfield UI) - Murder Mystery 2 with Original Fly
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "EXZ HUB : Murder Mystery 2",
+    LoadingTitle = "EXZ HUB Loading...",
+    LoadingSubtitle = "by EXZ",
+    ConfigurationSaving = {
+        Enabled = false,
+    },
+    KeySystem = false,
+})
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+
+-- สร้างแท็บ
+local MainTab = Window:CreateTab("Main Player", 4483362458)
+local CombatTab = Window:CreateTab("Combat / Killer", 4483362458)
+local VisualTab = Window:CreateTab("Visual (ESP)", 4483362458)
+
+-- ตัวแปรสถานะ
+local flying = false
+local flySpeed = 50
+local speedEnabled = false
+local walkSpeedValue = 16
+local noclipEnabled = false
+local noclipConnection
+local espEnabled = false
+local espHighlights = {}
+local autoKillEnabled = false
+local sheriffAimbotEnabled = false
+local aimbotFOV = 150
+local flingEnabled = false
+
+-- ==================== ระบบบิน (ดึงจากต้นฉบับ EXZ HUB) ====================
+local function startFly()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoidRootPart or not humanoid then return end
+
+    local bg = Instance.new("BodyGyro")
+    bg.P = 9e4
+    bg.maxTorque = Vector3.new(9e4, 9e4, 9e4)
+    bg.cframe = humanoidRootPart.CFrame
+    bg.Parent = humanoidRootPart
+
+    local bv = Instance.new("BodyVelocity")
+    bv.velocity = Vector3.new(0, 0, 0)
+    bv.maxForce = Vector3.new(9e4, 9e4, 9e4)
+    bv.Parent = humanoidRootPart
+
+    humanoid.PlatformStand = true
+
+    task.spawn(function()
+        local lz = {
+            [Enum.KeyCode.W] = Vector3.new(0, 0, -1),
+            [Enum.KeyCode.S] = Vector3.new(0, 0, 1),
+            [Enum.KeyCode.A] = Vector3.new(-1, 0, 0),
+            [Enum.KeyCode.D] = Vector3.new(1, 0, 0),
+            [Enum.KeyCode.Space] = Vector3.new(0, 1, 0),
+            [Enum.KeyCode.LeftShift] = Vector3.new(0, -1, 0)
+        }
+        
+        while flying do
+            RunService.RenderStepped:Wait()
+            local moveDir = Vector3.new()
+            for key, dir in pairs(lz) do
+                if UserInputService:IsKeyDown(key) then
+                    moveDir = moveDir + dir
+                end
+            end
+            
+            if moveDir.Magnitude > 0 then
+                bv.velocity = (Camera.CFrame:VectorToWorldSpace(moveDir)).Unit * flySpeed
+            else
+                bv.velocity = Vector3.new(0, 0, 0)
+            end
+            bg.cframe = Camera.CFrame
+        end
+
+        if bg then bg:Destroy() end
+        if bv then bv:Destroy() end
+        if humanoid then humanoid.PlatformStand = false end
+    end)
+end
+
+MainTab:CreateToggle({
+    Name = "เปิด/ปิด บิน (Fly)",
+    CurrentValue = false,
+    Flag = "FlyToggle",
+    Callback = function(state)
+        flying = state
+        if flying then
+            startFly()
+        else
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("Humanoid") then
+                char.Humanoid.PlatformStand = false
+            end
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "ความเร็วการบิน",
+    Range = {10, 200},
+    Increment = 1,
+    CurrentValue = 50,
+    Flag = "FlySpeedSlider",
+    Callback = function(value)
+        flySpeed = value
+    end,
+})
+
+-- ==================== 2. ระบบวิ่งเร็ว (WalkSpeed) ====================
+MainTab:CreateToggle({
+    Name = "เปิด/ปิด วิ่งเร็ว",
+    CurrentValue = false,
+    Flag = "SpeedToggle",
+    Callback = function(state)
+        speedEnabled = state
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "ปรับความเร็วเดิน",
+    Range = {16, 200},
+    Increment = 1,
+    CurrentValue = 16,
+    Flag = "SpeedSlider",
+    Callback = function(value)
+        walkSpeedValue = value
+    end,
+})
+
+RunService.RenderStepped:Connect(function()
+    if speedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = walkSpeedValue
+    end
+end)
+
+-- ==================== 3. ระบบเดินทะลุกำแพง (Noclip) ====================
+MainTab:CreateToggle({
+    Name = "เปิด/ปิด เดินทะลุกำแพง (Noclip)",
+    CurrentValue = false,
+    Flag = "NoclipToggle",
+    Callback = function(state)
+        noclipEnabled = state
+        if noclipEnabled then
+            noclipConnection = RunService.Stepped:Connect(function()
+                if LocalPlayer.Character then
+                    for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end)
+        else
+            if noclipConnection then noclipConnection:Disconnect() end
+        end
+    end,
+})
+
+-- ==================== 4. ดีดคนกระเด็นตกแมพ (Fling) ====================
+MainTab:CreateToggle({
+    Name = "เปิด/ปิด ดีดคนกระเด็นตกแมพ",
+    CurrentValue = false,
+    Flag = "FlingToggle",
+    Callback = function(state)
+        flingEnabled = state
+        task.spawn(function()
+            local ang = 0
+            while flingEnabled do
+                task.wait()
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    ang = ang + 100
+                    root.Velocity = Vector3.new(0, 30000, 0) + Vector3.new(math.cos(ang), 0, math.sin(ang)) * 10000
+                    root.RotVelocity = Vector3.new(30000, 30000, 30000)
+                end
+            end
+        end)
+    end,
+})
+
+-- ==================== ระบบ ESP เช็คบทบาท ====================
+local function getRole(player)
+    if not player.Character then return "Innocent" end
+    local backpack = player:FindFirstChild("Backpack")
+    local char = player.Character
+    if (char:FindFirstChild("Knife") or (backpack and backpack:FindFirstChild("Knife"))) then
+        return "Murderer"
+    elseif (char:FindFirstChild("Gun") or (backpack and backpack:FindFirstChild("Gun"))) then
+        return "Sheriff"
+    else
+        return "Innocent"
+    end
+end
+
+VisualTab:CreateToggle({
+    Name = "เปิด/ปิด ESP (แดง=ฆาตกร ฟ้า=นายอำเภอ เขียว=คนบริสุทธิ์)",
+    CurrentValue = false,
+    Flag = "EspToggle",
+    Callback = function(state)
+        espEnabled = state
+        if not espEnabled then
+            for _, h in pairs(espHighlights) do if h then h:Destroy() end end
+            espHighlights = {}
+        end
+    end,
+})
+
+RunService.RenderStepped:Connect(function()
+    if not espEnabled then return end
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
+            local role = getRole(player)
+            local highlight = espHighlights[player]
+            if not highlight then
+                highlight = Instance.new("Highlight")
+                highlight.Parent = char
+                espHighlights[player] = highlight
+            else
+                highlight.Parent = char
+            end
+            if role == "Murderer" then
+                highlight.FillColor = Color3.fromRGB(255, 0, 0)
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            elseif role == "Sheriff" then
+                highlight.FillColor = Color3.fromRGB(0, 150, 255)
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            else
+                highlight.FillColor = Color3.fromRGB(0, 255, 0)
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            end
+        end
+    end
+end)
+
+-- ==================== 5. โหมดฆาตกร (Auto Kill) ====================
+CombatTab:CreateToggle({
+    Name = "เปิด/ปิด ออโต้ฆ่า (วาร์ปไปฟันอัตโนมัติ)",
+    CurrentValue = false,
+    Flag = "AutoKillToggle",
+    Callback = function(state)
+        autoKillEnabled = state
+        task.spawn(function()
+            while autoKillEnabled do
+                task.wait(0.5)
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                local knife = char and char:FindFirstChild("Knife") or (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Knife"))
+                if root and knife then
+                    for _, player in pairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                            local pRoot = player.Character.HumanoidRootPart
+                            root.CFrame = pRoot.CFrame * CFrame.new(0, 0, 2)
+                            knife.Parent = char
+                            pcall(function() knife:Activate() end)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+            end
+        end)
+    end,
+})
+
+-- ==================== 6. โหมดนายอำเภอ (Aimbot ล็อกกลางจอถาวร) ====================
+CombatTab:CreateToggle({
+    Name = "เปิด/ปิด Aimbot นายอำเภอ (ล็อกฆาตกร)",
+    CurrentValue = false,
+    Flag = "AimbotToggle",
+    Callback = function(state)
+        sheriffAimbotEnabled = state
+    end,
+})
+
+CombatTab:CreateSlider({
+    Name = "ขนาดวง Aimbot FOV",
+    Range = {50, 400},
+    Increment = 1,
+    CurrentValue = 150,
+    Flag = "FOV是什麼",
+    Callback = function(value)
+        aimbotFOV = value
+    end,
+})
+
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = false
+fovCircle.Radius = aimbotFOV
+fovCircle.Color = Color3.fromRGB(0, 200, 255)
+fovCircle.Thickness = 2
+fovCircle.Filled = false
+fovCircle.Transparency = 0.7
+
+RunService.RenderStepped:Connect(function()
+    local screenSize = Camera.ViewportSize
+    local centerScreen = Vector2.new(screenSize.X / 2, screenSize.Y / 2)
+    
+    fovCircle.Position = centerScreen
+    fovCircle.Radius = aimbotFOV
+    fovCircle.Visible = sheriffAimbotEnabled
+    
+    if sheriffAimbotEnabled then
+        local target = nil
+        local shortestDist = aimbotFOV
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and getRole(player) == "Murderer" and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local pos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - centerScreen).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        target = player.Character.HumanoidRootPart
+                    end
+                end
+            end
+        end
+        if target then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+        end
+    end
+end)
